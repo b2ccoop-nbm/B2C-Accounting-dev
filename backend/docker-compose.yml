@@ -1,0 +1,23 @@
+# Local Postgres for accounting only — separate DB from WebApp (b2ccoop_webapp on :5432).
+# From backend/:  npm run db:up && npx prisma migrate dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: b2ccoop-accounting-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: b2ccoop_accounting
+    ports:
+      - "5433:5432"
+    volumes:
+      - b2ccoop_accounting_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d b2ccoop_accounting"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  b2ccoop_accounting_pgdata:

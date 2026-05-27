@@ -1,0 +1,190 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  COST_OF_GOODS
+  EXPENSE
+}
+
+enum TransactionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  POSTED
+  VOID
+}
+
+enum StaffRole {
+  SUPERUSER
+  ADMIN
+  TREASURER
+}
+
+/// Hierarchical chart of accounts (CDA MC 2016-06)
+model Account {
+  id          String      @id @default(uuid())
+  code        String      @unique
+  title       String
+  type        AccountType
+  description String?     @db.Text
+  parentId    String?
+  parent      Account?    @relation("AccountTree", fields: [parentId], references: [id])
+  children    Account[]   @relation("AccountTree")
+  isContra    Boolean     @default(false)
+  isStatutory Boolean     @default(false)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  journalLines JournalEntry[]
+  allocationRules AllocationRule[]
+
+  @@index([type])
+  @@index([parentId])
+}
+
+model FiscalPeriod {
+  id           String        @id @default(uuid())
+  year         Int
+  month        Int?
+  startDate    DateTime
+  endDate      DateTime
+  isClosed     Boolean       @default(false)
+  transactions Transaction[]
+
+  @@unique([year, month])
+}
+
+/// Voucher header — manual flow uses PENDING_APPROVAL; integration posts as POSTED
+model Transaction {
+  id              String            @id @default(uuid())
+  reference       String            @unique
+  description     String
+  transactionDate DateTime
+  postedAt        DateTime?
+  status          TransactionStatus @default(DRAFT)
+  postedBy        String
+  approvedBy      String?
+  source          String?
+  participantId   String?
+  currency        String            @default("PHP")
+  amount          Decimal?          @db.Decimal(18, 2)
+  memo            String?
+  metadata        Json?
+  fiscalPeriodId  String
+  fiscalPeriod    FiscalPeriod      @relation(fields: [fiscalPeriodId], references: [id])
+  integrationEvent IntegrationEvent?
+  entries         JournalEntry[]
+  createdAt       DateTime          @default(now())
+
+  @@index([status])
+  @@index([participantId])
+  @@index([fiscalPeriodId])
+  @@index([transactionDate])
+  @@index([source])
+}
+
+/// Idempotent integration key → Transaction
+model IntegrationEvent {
+  id            String      @id @default(uuid())
+  externalId    String      @unique
+  source        String
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+}
+
+/// Double-entry line (belongs to Transaction)
+model JournalEntry {
+  id            String      @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id])
+  debit         Decimal     @default(0) @db.Decimal(14, 2)
+  credit        Decimal     @default(0) @db.Decimal(14, 2)
+  memberId      String?
+  vendorId      String?
+  vendor        Vendor?     @relation(fields: [vendorId], references: [id])
+
+  @@index([transactionId])
+  @@index([accountId])
+  @@index([memberId])
+  @@index([vendorId])
+}
+
+/// Marketplace vendor (subsidiary AP ledger via journal line vendorId)
+model Vendor {
+  id           String         @id @default(uuid())
+  code         String         @unique
+  name         String
+  email        String?
+  phone        String?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  products     Product[]
+  journalLines JournalEntry[]
+
+  @@index([isActive])
+}
+
+/// Vendor catalog item (Phase 2 — store checkout posts sale by sku)
+model Product {
+  id          String   @id @default(uuid())
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  sku         String
+  name        String
+  unitPrice   Decimal  @db.Decimal(14, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([vendorId, sku])
+  @@index([vendorId])
+}
+
+model AllocationTemplate {
+  id    String           @id @default(uuid())
+  name  String           @unique
+  rules AllocationRule[]
+}
+
+model AllocationRule {
+  id         String             @id @default(uuid())
+  templateId String
+  template   AllocationTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    Account            @relation(fields: [accountId], references: [id])
+  percentage Decimal            @db.Decimal(5, 4)
+  category   String?
+
+  @@index([templateId])
+}
+
+model StaffUser {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  role        StaffRole @default(TREASURER)
+  firebaseUid String?   @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Maps integration `source` values to debit/credit account codes
+model SourcePostingRule {
+  id          String  @id @default(uuid())
+  source      String  @unique
+  debitCode   String
+  creditCode  String
+  description String?
+}

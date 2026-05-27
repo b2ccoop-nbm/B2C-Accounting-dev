@@ -1,0 +1,12 @@
+{
+  "name": "b2ccoop-accounting",
+  "private": true,
+  "description": "B2CCoop Accounting — ledger, COA, journals (separate from WebApp).",
+  "scripts": {
+    "dev:api": "npm run dev --prefix backend",
+    "dev:ui": "npm run dev --prefix frontend",
+    "db:up": "npm run db:up --prefix backend",
+    "db:migrate": "npm run prisma:migrate --prefix backend",
+    "db:seed": "npm run prisma:seed --prefix backend"
+  }
+}
