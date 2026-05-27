@@ -27,7 +27,7 @@ Optional display-only fields (can change; do not use as sole key):
 |-------|---------------|-------------------------------|
 | Share + membership fee received | `Participant.initialFeesPaidAt` set (Treasurer action) | `membership.initial_fees` |
 | LOI pledged capital | `LoiSubmission.initialCapital` | informational / memo only until paid |
-| Marketplace / store sale | Checkout webhook (Phase 2) | `commerce.sale` |
+| Marketplace / store sale | Member checkout or store webhook (Phase 2b) | `commerce.sale` |
 
 Treasurer confirmation today: staff role **`TREASURER`** (or ADMIN / SUPERUSER) via PMES admin API — see `backend/src/pmes/pmes.service.ts` (`confirm fee payment`).
 
@@ -81,13 +81,34 @@ Content-Type: application/json
 - **`externalId`** must be unique per logical event (replay-safe).
 - Respond `200` if already posted, `201` if created.
 
-### Member sub-ledger (for portal strip later)
+### Member sub-ledger (Treasurer UI + portal)
 
 ```http
 GET /integrations/v1/members/{participantId}/summary
+GET /integrations/v1/members/{participantId}/ledger
 ```
 
-Returns balances / last payment — read-only.
+`summary` — share capital, cash received, last payment.  
+`ledger` — summary + patronage + up to 40 posted journal vouchers for the member.
+
+### Reports (Accounting UI)
+
+```http
+GET /ledger/reports/trial-balance?asOf=2026-05-27
+```
+
+Posted activity through `asOf` date. Staff JWT required.
+
+### Member patronage ledger (Phase 2c)
+
+```http
+GET /integrations/v1/members/{participantId}/patronage
+Authorization: Bearer <staff-jwt-or-INTEGRATION_SERVICE_SECRET>
+```
+
+Returns accrued patronage payable balance (`21310`), purchase count, and recent accrual rows from `commerce.sale` postings.
+
+WebApp member portal proxies via `GET /members/patronage-summary?email=...` (Firebase Bearer).
 
 ### Marketplace sale (Phase 2 — multi-line, idempotent)
 
@@ -103,6 +124,8 @@ Content-Type: application/json
   "grossAmount": 470.00,
   "salesAmount": 70.00,
   "vendorPayableAmount": 400.00,
+  "cogsAmount": 400.00,
+  "patronageAmount": 7.00,
   "vendorCode": "B2C-DEMO",
   "buyerParticipantId": "<optional Participant.id>",
   "memo": "Rice + oil bundle",
@@ -112,9 +135,20 @@ Content-Type: application/json
 
 - **`grossAmount`** = **`salesAmount`** + **`vendorPayableAmount`** (balanced three-line post).
 - Ledger: Dr **`11110`** Cash · Cr **`40310`** Sales · Cr **`21210`** AP (vendor subsidiary via `vendorId`).
+- Optional Phase 2c lines:
+  - Dr **`50110`** COGS · Cr **`11410`** Inventory when `cogsAmount > 0`
+  - Dr **`50410`** Patronage Refund Expense · Cr **`21310`** Patronage Refund Payable when `patronageAmount > 0`
 - Respond `201` created / `200` already posted (same `externalId`).
 
 Staff UI: `GET /api/v1/finance/vendors`, `GET /api/v1/finance/vendors/:code/ap-balance`.
+
+## WebApp store checkout (Phase 2b — implemented in B2C-PMES)
+
+The WebApp posts to this endpoint; see **`B2C-PMES/docs/ACCOUNTING-INTEGRATION.md`** for member checkout and external webhook contracts.
+
+- `GET /store/catalog` — demo SKUs (`RICE-5KG`, `OIL-1L`)
+- `POST /store/checkout` — member Firebase auth → `order:<uuid>` → `marketplace-sale`
+- `POST /integrations/store/checkout` — external store webhook (`STORE_CHECKOUT_WEBHOOK_SECRET`)
 
 ## Local dev ports (suggested)
 

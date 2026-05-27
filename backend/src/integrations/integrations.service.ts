@@ -21,6 +21,8 @@ export type MemberSearchHit = {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const PATRONAGE_PAYABLE_CODE = "21310";
+
 export type JournalEventResult = {
   id: string;
   externalId: string;
@@ -99,8 +101,10 @@ export class IntegrationsService {
     }
 
     const transaction = await this.prisma.$transaction(async (tx) => {
+      const jvNumber = await this.ledger.allocateJvNumber(tx, occurredAt);
       const created = await tx.transaction.create({
         data: {
+          jvNumber,
           reference: dto.externalId,
           description: dto.memo ?? dto.source,
           transactionDate: occurredAt,
@@ -146,6 +150,131 @@ export class IntegrationsService {
     });
 
     return { created: true, entry: this.toResult(transaction) };
+  }
+
+  async getMemberPatronageSummary(participantId: string) {
+    const patronageLines = await this.prisma.journalEntry.findMany({
+      where: {
+        memberId: participantId,
+        account: { code: PATRONAGE_PAYABLE_CODE },
+        transaction: { status: TransactionStatus.POSTED },
+      },
+      include: {
+        account: true,
+        transaction: { include: { integrationEvent: true } },
+      },
+      orderBy: { transaction: { transactionDate: "desc" } },
+    });
+
+    let patronageAccruedBalance = new Decimal(0);
+    const accrualByTx = new Map<
+      string,
+      {
+        transactionId: string;
+        externalId: string;
+        occurredAt: string;
+        source: string | null;
+        memo: string | null;
+        grossAmount: string | null;
+        patronageAmount: string;
+      }
+    >();
+
+    for (const line of patronageLines) {
+      patronageAccruedBalance = patronageAccruedBalance
+        .add(new Decimal(line.credit))
+        .sub(new Decimal(line.debit));
+
+      const tx = line.transaction;
+      const meta = (tx.metadata ?? {}) as Record<string, unknown>;
+      const patronageFromMeta =
+        typeof meta.patronageAmount === "string"
+          ? meta.patronageAmount
+          : typeof meta.patronageAmount === "number"
+            ? meta.patronageAmount.toFixed(2)
+            : new Decimal(line.credit).sub(new Decimal(line.debit)).toFixed(2);
+
+      const existing = accrualByTx.get(tx.id);
+      const lineNet = new Decimal(line.credit).sub(new Decimal(line.debit));
+      if (existing) {
+        existing.patronageAmount = new Decimal(existing.patronageAmount).add(lineNet).toFixed(2);
+        continue;
+      }
+
+      accrualByTx.set(tx.id, {
+        transactionId: tx.id,
+        externalId: tx.integrationEvent?.externalId ?? tx.reference,
+        occurredAt: (tx.postedAt ?? tx.transactionDate).toISOString(),
+        source: tx.source,
+        memo: tx.memo,
+        grossAmount: tx.amount?.toFixed(2) ?? null,
+        patronageAmount: patronageFromMeta,
+      });
+    }
+
+    const accruals = [...accrualByTx.values()].filter((a) => Number(a.patronageAmount) > 0);
+    const lastAccrualAt = accruals[0]?.occurredAt ?? null;
+
+    return {
+      participantId,
+      currency: "PHP",
+      patronageAccruedBalance: patronageAccruedBalance.toFixed(2),
+      patronageExpenseTotal: patronageAccruedBalance.toFixed(2),
+      purchaseCount: accruals.length,
+      lastAccrualAt,
+      accruals,
+      note:
+        accruals.length === 0
+          ? "No patronage accruals yet — shop at the Coop store to earn patronage refunds on purchases."
+          : null,
+    };
+  }
+
+  async getMemberLedger(participantId: string) {
+    let summary: Awaited<ReturnType<IntegrationsService["getMemberSummary"]>> | null = null;
+    try {
+      summary = await this.getMemberSummary(participantId);
+    } catch (e) {
+      if (!(e instanceof NotFoundException)) throw e;
+    }
+
+    const patronage = await this.getMemberPatronageSummary(participantId);
+
+    const txIds = new Set<string>();
+    const byParticipant = await this.prisma.transaction.findMany({
+      where: { participantId, status: TransactionStatus.POSTED },
+      select: { id: true },
+    });
+    for (const t of byParticipant) txIds.add(t.id);
+
+    const byLine = await this.prisma.journalEntry.findMany({
+      where: { memberId: participantId, transaction: { status: TransactionStatus.POSTED } },
+      select: { transactionId: true },
+      distinct: ["transactionId"],
+    });
+    for (const l of byLine) txIds.add(l.transactionId);
+
+    const transactions =
+      txIds.size === 0
+        ? []
+        : await this.prisma.transaction.findMany({
+            where: { id: { in: [...txIds] }, status: TransactionStatus.POSTED },
+            orderBy: { transactionDate: "desc" },
+            take: 40,
+            include: {
+              fiscalPeriod: true,
+              integrationEvent: true,
+              entries: { include: { account: true, vendor: true } },
+            },
+          });
+
+    return {
+      participantId,
+      summary,
+      patronage,
+      transactions,
+      entryCount: transactions.length,
+    };
   }
 
   async getMemberSummary(participantId: string) {

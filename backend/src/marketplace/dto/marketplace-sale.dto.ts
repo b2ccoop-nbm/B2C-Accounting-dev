@@ -39,6 +39,18 @@ export class MarketplaceSaleDto {
   @Min(0)
   vendorPayableAmount!: number;
 
+  /** Optional: cost of goods sold accrual (Dr COGS, Cr Inventory). */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  cogsAmount?: number;
+
+  /** Optional: patronage accrual (Dr patronage expense, Cr patronage payable). */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  patronageAmount?: number;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(64)

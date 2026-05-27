@@ -28,6 +28,14 @@ export class LedgerController {
     return this.ledger.listTransactions(Number.isFinite(n) ? n : 50, st);
   }
 
+  /** Next JV number preview (does not consume sequence until voucher is saved). */
+  @Get("journals/next-jv")
+  peekNextJv(@Query("date") date?: string) {
+    const parsed = date ? new Date(date) : new Date();
+    const when = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return this.ledger.peekNextJvNumber(when).then((jvNumber) => ({ jvNumber }));
+  }
+
   @Get("vouchers/pending")
   getPendingVouchers() {
     return this.ledger.getPendingVouchers();
@@ -61,5 +69,10 @@ export class LedgerController {
   @Get("accounts/:code/balance")
   getAccountBalance(@Param("code") code: string) {
     return this.ledger.getHierarchicalBalance(code).then((balance) => ({ code, balance }));
+  }
+
+  @Get("reports/trial-balance")
+  getTrialBalance(@Query("asOf") asOf?: string) {
+    return this.ledger.getTrialBalance(asOf);
   }
 }

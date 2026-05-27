@@ -36,8 +36,14 @@ export class CreateTransactionDto {
   @IsDateString()
   date!: string;
 
+  /** Optional supporting document (OR, SI, check no.) — JV number is assigned by the system. */
+  @IsOptional()
   @IsString()
-  reference!: string;
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  sourceDocument?: string;
 
   @IsString()
   description!: string;

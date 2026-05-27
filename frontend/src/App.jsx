@@ -5,8 +5,12 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
+import { JournalLinesTable, JournalVoucherCard } from "./components/JournalVoucher.jsx";
 import { apiFetch } from "./lib/api.js";
 import { auth, firebaseConfigured } from "./lib/firebase.js";
+import { downloadJournalsCsv, downloadTrialBalanceCsv } from "./lib/journalExport.js";
+import { formatAccountingDate } from "./lib/journalFormat.js";
+import { printJournalVouchers } from "./lib/journalPrint.js";
 
 const TOKEN_KEY = "b2c_accounting_staff_token";
 
@@ -18,6 +22,7 @@ const NAV = [
   { id: "members", label: "Members" },
   { id: "coa", label: "Chart of accounts" },
   { id: "journals", label: "Journals" },
+  { id: "reports", label: "Reports" },
 ];
 
 const DASHBOARD_CODES = [
@@ -49,7 +54,8 @@ function formatMoney(value, currency = "PHP") {
 function emptyVoucher() {
   return {
     date: new Date().toISOString().slice(0, 10),
-    reference: "",
+    jvPreview: "",
+    sourceDocument: "",
     description: "",
     entries: [
       { accountId: "", debit: "", credit: "" },
@@ -92,34 +98,6 @@ function CoaRow({ node, depth, balances }) {
   );
 }
 
-function JournalCard({ journal }) {
-  const when = journal.transactionDate ?? journal.occurredAt;
-  const ref = journal.integrationEvent?.externalId ?? journal.reference ?? journal.externalId;
-  const lines = journal.entries ?? journal.lines ?? [];
-  return (
-    <article className="border border-gray-100 rounded-lg p-4 text-sm">
-      <div className="flex flex-wrap justify-between gap-2">
-        <span className="font-medium">{journal.source ?? journal.description}</span>
-        <span className="text-gray-500">{when ? new Date(when).toLocaleString() : "—"}</span>
-      </div>
-      <p className="text-gray-600 mt-1">
-        {journal.amount != null ? formatMoney(journal.amount, journal.currency) : null}
-        {journal.memo ? ` · ${journal.memo}` : ""}
-        {journal.status ? ` · ${journal.status}` : ""}
-      </p>
-      <p className="font-mono text-xs text-gray-400 mt-1 truncate">{ref}</p>
-      <ul className="mt-2 space-y-1 text-xs text-gray-700">
-        {lines.map((l) => (
-          <li key={l.id}>
-            {l.account?.code} {l.account?.title ?? l.account?.name}: Dr {String(l.debit)} Cr{" "}
-            {String(l.credit)}
-          </li>
-        ))}
-      </ul>
-    </article>
-  );
-}
-
 export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -139,7 +117,13 @@ export default function App() {
   const [memberSearch, setMemberSearch] = useState({ firstName: "", lastName: "", memberId: "" });
   const [searchResults, setSearchResults] = useState([]);
   const [memberSummary, setMemberSummary] = useState(null);
+  const [memberPatronage, setMemberPatronage] = useState(null);
+  const [memberLedger, setMemberLedger] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  const [trialBalance, setTrialBalance] = useState(null);
+  const [trialAsOf, setTrialAsOf] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reportsLoading, setReportsLoading] = useState(false);
 
   const [voucher, setVoucher] = useState(emptyVoucher);
   const [voucherSubmitting, setVoucherSubmitting] = useState(false);
@@ -163,6 +147,38 @@ export default function App() {
     [accounts],
   );
   const accountTree = useMemo(() => buildAccountTree(accounts), [accounts]);
+
+  useEffect(() => {
+    if (page !== "voucher" || !token) return;
+    let cancelled = false;
+    const q = new URLSearchParams({ date: voucher.date });
+    apiFetch(`/ledger/journals/next-jv?${q}`, { token })
+      .then((res) => {
+        if (!cancelled && res?.jvNumber) {
+          setVoucher((v) => ({ ...v, jvPreview: res.jvNumber }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [page, token, voucher.date]);
+
+  const voucherPreviewLines = useMemo(() => {
+    return voucher.entries
+      .filter((row) => row.accountId && (row.debit || row.credit))
+      .map((row, idx) => {
+        const account = accounts.find((a) => a.id === row.accountId);
+        return {
+          id: `draft-${idx}`,
+          debit: row.debit || 0,
+          credit: row.credit || 0,
+          account: account
+            ? { code: account.code, title: account.title, name: account.title }
+            : { code: "?", title: "Select account" },
+        };
+      });
+  }, [voucher.entries, accounts]);
 
   const persistToken = useCallback((t) => {
     setToken(t);
@@ -221,7 +237,7 @@ export default function App() {
     if (!token) return;
     const [acct, jour, pend] = await Promise.all([
       apiFetch("/ledger/accounts", { token }),
-      apiFetch("/ledger/journals?limit=30&status=POSTED", { token }),
+      apiFetch("/ledger/journals?limit=100&status=POSTED", { token }),
       apiFetch("/ledger/vouchers/pending", { token }),
     ]);
     setAccounts(acct);
@@ -332,19 +348,39 @@ export default function App() {
     setJournals([]);
     setPending([]);
     setMemberSummary(null);
+    setMemberPatronage(null);
     setSearchResults([]);
     if (auth) await signOut(auth);
   }
 
   async function loadMemberSummary(participantId) {
-    const summary = await apiFetch(`/integrations/v1/members/${participantId}/summary`, { token });
-    setMemberSummary(summary);
+    const ledger = await apiFetch(`/integrations/v1/members/${participantId}/ledger`, { token });
+    setMemberLedger(ledger);
+    setMemberSummary(ledger.summary ?? null);
+    setMemberPatronage(ledger.patronage ?? null);
+    return ledger;
+  }
+
+  async function loadTrialBalance() {
+    setReportsLoading(true);
+    setError("");
+    try {
+      const q = trialAsOf ? `?asOf=${encodeURIComponent(trialAsOf)}` : "";
+      const report = await apiFetch(`/ledger/reports/trial-balance${q}`, { token });
+      setTrialBalance(report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Trial balance failed");
+    } finally {
+      setReportsLoading(false);
+    }
   }
 
   async function searchMembers(e) {
     e.preventDefault();
     setError("");
     setMemberSummary(null);
+    setMemberPatronage(null);
+    setMemberLedger(null);
     setSearchResults([]);
     setSearchLoading(true);
     try {
@@ -360,7 +396,7 @@ export default function App() {
       }
       const data = await apiFetch(`/integrations/v1/members/search?${params.toString()}`, { token });
       setSearchResults(data.results ?? []);
-      if (data.results?.length === 1 && data.results[0].hasLedgerActivity) {
+      if (data.results?.length === 1) {
         await loadMemberSummary(data.results[0].participantId);
       }
     } catch (err) {
@@ -372,13 +408,15 @@ export default function App() {
 
   async function selectMember(hit) {
     setError("");
+    setNotice("");
     setMemberSummary(null);
-    if (!hit.hasLedgerActivity) {
-      setError("Member found in WebApp registry but no accounting ledger entries yet.");
-      return;
-    }
+    setMemberPatronage(null);
+    setMemberLedger(null);
     try {
-      await loadMemberSummary(hit.participantId);
+      const ledger = await loadMemberSummary(hit.participantId);
+      if (!hit.hasLedgerActivity && !(ledger.transactions?.length)) {
+        setNotice("Member found in WebApp — no accounting entries yet.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load ledger");
     }
@@ -437,13 +475,14 @@ export default function App() {
           credit: Number(row.credit) || 0,
         }));
       if (entries.length < 2) throw new Error("Add at least two journal lines.");
+      const sourceDocument = voucher.sourceDocument.trim();
       await apiFetch("/ledger/vouchers", {
         method: "POST",
         token,
         body: JSON.stringify({
           date: voucher.date,
-          reference: voucher.reference.trim(),
           description: voucher.description.trim(),
+          ...(sourceDocument ? { sourceDocument } : {}),
           entries,
         }),
       });
@@ -545,13 +584,25 @@ export default function App() {
             {staff?.email ?? "Staff"} · {staff?.role ?? "staff"}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="text-sm bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          {(import.meta.env.VITE_WEBAPP_URL || "").trim() ? (
+            <a
+              href={(import.meta.env.VITE_WEBAPP_URL || "").trim()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg"
+            >
+              Member WebApp
+            </a>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="text-sm bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
@@ -661,66 +712,53 @@ export default function App() {
           )}
 
           {page === "pending" && (
-            <section
-              className="bg-white rounded-xl border p-6 shadow-sm space-y-4"
-              style={{ borderColor: "var(--b2c-border)" }}
-            >
-              <h2 className="text-lg font-semibold">Pending approval</h2>
+            <section className="space-y-4">
+              <div
+                className="rounded-xl border bg-white p-5 shadow-sm"
+                style={{ borderColor: "var(--b2c-border)" }}
+              >
+                <h2 className="text-lg font-semibold text-slate-900">Vouchers pending approval</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  Review each journal voucher below. Confirm debits equal credits before posting to the general ledger.
+                </p>
+              </div>
               {pending.length === 0 && (
-                <p className="text-sm text-gray-500">No vouchers waiting for treasurer approval.</p>
+                <p className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500">
+                  No vouchers waiting for treasurer approval.
+                </p>
               )}
-              {pending.map((v) => {
-                const totalDr = (v.entries ?? []).reduce((s, l) => s + Number(l.debit), 0);
-                return (
-                  <article key={v.id} className="border rounded-lg p-4 space-y-3" style={{ borderColor: "var(--b2c-border)" }}>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <div>
-                        <p className="font-medium">{v.description}</p>
-                        <p className="text-xs text-gray-500 font-mono">{v.reference}</p>
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        {v.transactionDate ? new Date(v.transactionDate).toLocaleDateString() : "—"} ·{" "}
-                        {formatMoney(totalDr)}
-                      </p>
-                    </div>
-                    <ul className="text-xs space-y-1 text-gray-700">
-                      {(v.entries ?? []).map((l) => (
-                        <li key={l.id}>
-                          {l.account?.code} {l.account?.title}: Dr {String(l.debit)} Cr {String(l.credit)}
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="flex flex-wrap gap-2 items-end">
-                      <button
-                        type="button"
-                        disabled={actionLoading === v.id}
-                        onClick={() => approveVoucher(v.id)}
-                        className="rounded-lg text-white px-4 py-2 text-sm font-medium disabled:opacity-60"
-                        style={{ background: "var(--b2c-forest-900)" }}
-                      >
-                        Approve &amp; post
-                      </button>
-                      <input
-                        type="text"
-                        placeholder="Rejection reason"
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[12rem] flex-1"
-                        value={rejectReason[v.id] ?? ""}
-                        onChange={(ev) =>
-                          setRejectReason((r) => ({ ...r, [v.id]: ev.target.value }))
-                        }
-                      />
-                      <button
-                        type="button"
-                        disabled={actionLoading === v.id}
-                        onClick={() => rejectVoucher(v.id)}
-                        className="rounded-lg border border-red-200 text-red-700 px-4 py-2 text-sm font-medium hover:bg-red-50 disabled:opacity-60"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
+              <div className="space-y-5">
+              {pending.map((v) => (
+                <JournalVoucherCard key={v.id} transaction={v} variant="pending">
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <button
+                      type="button"
+                      disabled={actionLoading === v.id}
+                      onClick={() => approveVoucher(v.id)}
+                      className="rounded-lg text-white px-4 py-2 text-sm font-medium disabled:opacity-60"
+                      style={{ background: "var(--b2c-forest-900)" }}
+                    >
+                      Approve &amp; post
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Rejection reason (required to reject)"
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[12rem] flex-1"
+                      value={rejectReason[v.id] ?? ""}
+                      onChange={(ev) => setRejectReason((r) => ({ ...r, [v.id]: ev.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      disabled={actionLoading === v.id}
+                      onClick={() => rejectVoucher(v.id)}
+                      className="rounded-lg border border-red-200 text-red-700 px-4 py-2 text-sm font-medium hover:bg-red-50 disabled:opacity-60"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </JournalVoucherCard>
+              ))}
+              </div>
             </section>
           )}
 
@@ -733,7 +771,7 @@ export default function App() {
               <form onSubmit={submitVoucher} className="space-y-4">
                 <div className="grid sm:grid-cols-3 gap-3">
                   <label className="block text-sm font-medium">
-                    Date
+                    Transaction date
                     <input
                       type="date"
                       required
@@ -742,13 +780,25 @@ export default function App() {
                       onChange={(ev) => setVoucher((v) => ({ ...v, date: ev.target.value }))}
                     />
                   </label>
-                  <label className="block text-sm font-medium sm:col-span-2">
-                    Reference
+                  <label className="block text-sm font-medium">
+                    JV no. (assigned on save)
                     <input
-                      required
-                      className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono"
-                      value={voucher.reference}
-                      onChange={(ev) => setVoucher((v) => ({ ...v, reference: ev.target.value }))}
+                      readOnly
+                      className="mt-1 w-full rounded-lg border border-[var(--b2c-border)] bg-slate-50 px-3 py-2 text-sm font-mono font-bold text-[var(--b2c-forest-900)]"
+                      value={voucher.jvPreview || "…"}
+                      aria-describedby="jv-preview-hint"
+                    />
+                    <span id="jv-preview-hint" className="mt-1 block text-xs text-slate-500">
+                      Preview only — final number reserved when you submit.
+                    </span>
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Source document (optional)
+                    <input
+                      className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                      placeholder="OR / SI / check no."
+                      value={voucher.sourceDocument}
+                      onChange={(ev) => setVoucher((v) => ({ ...v, sourceDocument: ev.target.value }))}
                     />
                   </label>
                 </div>
@@ -761,61 +811,118 @@ export default function App() {
                     onChange={(ev) => setVoucher((v) => ({ ...v, description: ev.target.value }))}
                   />
                 </label>
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Journal lines</p>
-                  {voucher.entries.map((row, idx) => (
-                    <div key={idx} className="grid sm:grid-cols-4 gap-2">
-                      <select
-                        required={idx < 2}
-                        className="sm:col-span-2 rounded-lg border border-gray-200 px-2 py-2 text-sm"
-                        value={row.accountId}
-                        onChange={(ev) => {
-                          const accountId = ev.target.value;
-                          setVoucher((v) => ({
-                            ...v,
-                            entries: v.entries.map((e, i) => (i === idx ? { ...e, accountId } : e)),
-                          }));
-                        }}
-                      >
-                        <option value="">Select account</option>
-                        {leafAccounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} — {a.title}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Debit"
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                        value={row.debit}
-                        onChange={(ev) => {
-                          const debit = ev.target.value;
-                          setVoucher((v) => ({
-                            ...v,
-                            entries: v.entries.map((e, i) => (i === idx ? { ...e, debit } : e)),
-                          }));
-                        }}
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Credit"
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                        value={row.credit}
-                        onChange={(ev) => {
-                          const credit = ev.target.value;
-                          setVoucher((v) => ({
-                            ...v,
-                            entries: v.entries.map((e, i) => (i === idx ? { ...e, credit } : e)),
-                          }));
-                        }}
-                      />
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Journal lines</p>
+                      <p className="text-xs text-slate-500">
+                        Enter amount in <strong>one</strong> column per line (debit or credit), not both.
+                      </p>
                     </div>
-                  ))}
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full min-w-[32rem] text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                          <th className="px-3 py-2">Account</th>
+                          <th className="w-28 px-3 py-2 text-right">Debit (₱)</th>
+                          <th className="w-28 px-3 py-2 text-right">Credit (₱)</th>
+                          <th className="w-10 px-2 py-2" aria-label="Remove line" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {voucher.entries.map((row, idx) => (
+                          <tr key={idx} className="border-b border-slate-100 last:border-b-0">
+                            <td className="px-2 py-1.5">
+                              <select
+                                required={idx < 2}
+                                className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm"
+                                value={row.accountId}
+                                onChange={(ev) => {
+                                  const accountId = ev.target.value;
+                                  setVoucher((v) => ({
+                                    ...v,
+                                    entries: v.entries.map((e, i) =>
+                                      i === idx ? { ...e, accountId } : e,
+                                    ),
+                                  }));
+                                }}
+                              >
+                                <option value="">Select account code &amp; title</option>
+                                {leafAccounts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.code} — {a.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="0.00"
+                                className="w-full rounded-lg border border-gray-200 px-2 py-2 text-right font-mono text-sm tabular-nums"
+                                value={row.debit}
+                                onChange={(ev) => {
+                                  const debit = ev.target.value;
+                                  setVoucher((v) => ({
+                                    ...v,
+                                    entries: v.entries.map((e, i) =>
+                                      i === idx ? { ...e, debit, credit: debit ? "" : e.credit } : e,
+                                    ),
+                                  }));
+                                }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="0.00"
+                                className="w-full rounded-lg border border-gray-200 px-2 py-2 text-right font-mono text-sm tabular-nums"
+                                value={row.credit}
+                                onChange={(ev) => {
+                                  const credit = ev.target.value;
+                                  setVoucher((v) => ({
+                                    ...v,
+                                    entries: v.entries.map((e, i) =>
+                                      i === idx ? { ...e, credit, debit: credit ? "" : e.debit } : e,
+                                    ),
+                                  }));
+                                }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 text-center">
+                              {voucher.entries.length > 2 ? (
+                                <button
+                                  type="button"
+                                  className="text-xs font-bold text-red-600 hover:underline"
+                                  onClick={() =>
+                                    setVoucher((v) => ({
+                                      ...v,
+                                      entries: v.entries.filter((_, i) => i !== idx),
+                                    }))
+                                  }
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {voucherPreviewLines.length >= 2 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Voucher preview (as it will appear when posted)
+                      </p>
+                      <JournalLinesTable lines={voucherPreviewLines} compact />
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     className="text-sm underline"
@@ -947,9 +1054,10 @@ export default function App() {
               className="bg-white rounded-xl border p-6 shadow-sm"
               style={{ borderColor: "var(--b2c-border)" }}
             >
-              <h2 className="text-lg font-semibold mb-3">Member sub-ledger</h2>
+              <h2 className="text-lg font-semibold mb-3">Member passbook</h2>
               <p className="text-sm text-gray-600 mb-4">
-                Search by last name, first name, or B2C member ID. Results come from the WebApp registry.
+                Search by last name, first name, or B2C member ID. Shows share capital, cash received, patronage, and
+                posted journal vouchers for that member.
               </p>
               <form onSubmit={searchMembers} className="grid sm:grid-cols-2 gap-3">
                 <label className="block text-sm font-medium">
@@ -1006,22 +1114,59 @@ export default function App() {
                   ))}
                 </ul>
               )}
-              {memberSummary && (
-                <dl className="mt-4 grid sm:grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <dt className="text-gray-500">Share capital balance</dt>
-                    <dd className="font-semibold">
-                      {formatMoney(memberSummary.shareCapitalBalance, memberSummary.currency)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Cash received (ledger)</dt>
-                    <dd className="font-semibold">
-                      {formatMoney(memberSummary.cashReceivedTotal, memberSummary.currency)}
-                    </dd>
-                  </div>
-                </dl>
+              {(memberSummary || memberPatronage) && (
+                <div className="mt-4 rounded-xl border bg-slate-50/80 p-4" style={{ borderColor: "var(--b2c-border)" }}>
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">Balances</p>
+                  <dl className="mt-2 grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                    {memberSummary ? (
+                      <>
+                        <div>
+                          <dt className="text-gray-500">Share capital</dt>
+                          <dd className="font-semibold tabular-nums">
+                            {formatMoney(memberSummary.shareCapitalBalance, memberSummary.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Cash received</dt>
+                          <dd className="font-semibold tabular-nums">
+                            {formatMoney(memberSummary.cashReceivedTotal, memberSummary.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Last payment</dt>
+                          <dd className="font-medium">{formatAccountingDate(memberSummary.lastPaymentAt)}</dd>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-600 sm:col-span-2">No fee payment posted yet.</p>
+                    )}
+                    {memberPatronage ? (
+                      <>
+                        <div>
+                          <dt className="text-gray-500">Patronage accrued</dt>
+                          <dd className="font-semibold tabular-nums text-[var(--b2c-forest-900)]">
+                            {formatMoney(memberPatronage.patronageAccruedBalance, memberPatronage.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-gray-500">Coop store purchases</dt>
+                          <dd className="font-semibold">{memberPatronage.purchaseCount ?? 0}</dd>
+                        </div>
+                      </>
+                    ) : null}
+                  </dl>
+                </div>
               )}
+              {memberLedger?.transactions?.length ? (
+                <div className="mt-6 space-y-4">
+                  <p className="text-sm font-semibold text-slate-800">Posted vouchers ({memberLedger.entryCount})</p>
+                  {memberLedger.transactions.map((tx) => (
+                    <JournalVoucherCard key={tx.id} transaction={tx} variant="posted" />
+                  ))}
+                </div>
+              ) : memberLedger ? (
+                <p className="mt-4 text-sm text-slate-500">No posted journal vouchers for this member yet.</p>
+              ) : null}
             </section>
           )}
 
@@ -1049,18 +1194,154 @@ export default function App() {
             </section>
           )}
 
+          {page === "reports" && (
+            <section className="space-y-4">
+              <div
+                className="rounded-xl border bg-white p-5 shadow-sm"
+                style={{ borderColor: "var(--b2c-border)" }}
+              >
+                <h2 className="text-lg font-semibold text-slate-900">Trial balance</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  Posted journal activity through the selected date. Balances follow normal account type (assets/expenses
+                  debit-normal).
+                </p>
+                <div className="mt-4 flex flex-wrap items-end gap-3">
+                  <label className="block text-sm font-medium">
+                    As of
+                    <input
+                      type="date"
+                      className="mt-1 block rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                      value={trialAsOf}
+                      onChange={(ev) => setTrialAsOf(ev.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={reportsLoading}
+                    onClick={() => void loadTrialBalance()}
+                    className="rounded-lg text-white px-4 py-2 text-sm font-medium disabled:opacity-60"
+                    style={{ background: "var(--b2c-forest-900)" }}
+                  >
+                    {reportsLoading ? "Loading…" : "Run trial balance"}
+                  </button>
+                  {trialBalance?.rows?.length ? (
+                    <button
+                      type="button"
+                      onClick={() => downloadTrialBalanceCsv(trialBalance)}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-800"
+                    >
+                      Export CSV
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {trialBalance?.rows?.length ? (
+                <div
+                  className="overflow-x-auto rounded-xl border bg-white p-4 shadow-sm"
+                  style={{ borderColor: "var(--b2c-border)" }}
+                >
+                  <table className="w-full min-w-[40rem] text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs font-bold uppercase text-slate-500">
+                        <th className="py-2 pr-3">Code</th>
+                        <th className="py-2 pr-3">Account</th>
+                        <th className="py-2 pr-3">Type</th>
+                        <th className="py-2 pr-3 text-right">Debit</th>
+                        <th className="py-2 pr-3 text-right">Credit</th>
+                        <th className="py-2 text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trialBalance.rows.map((r) => (
+                        <tr key={r.code} className="border-b border-slate-50">
+                          <td className="py-2 pr-3 font-mono text-xs">{r.code}</td>
+                          <td className="py-2 pr-3">{r.title}</td>
+                          <td className="py-2 pr-3 text-xs text-slate-500">{r.type}</td>
+                          <td className="py-2 pr-3 text-right font-mono tabular-nums">
+                            {formatMoney(r.debitTotal)}
+                          </td>
+                          <td className="py-2 pr-3 text-right font-mono tabular-nums">
+                            {formatMoney(r.creditTotal)}
+                          </td>
+                          <td className="py-2 text-right font-mono tabular-nums font-semibold">
+                            {formatMoney(r.balance)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 font-bold">
+                        <td colSpan={3} className="py-2 text-right text-xs uppercase text-slate-500">
+                          Totals
+                        </td>
+                        <td className="py-2 text-right font-mono tabular-nums">
+                          {formatMoney(trialBalance.totals.debit)}
+                        </td>
+                        <td className="py-2 text-right font-mono tabular-nums">
+                          {formatMoney(trialBalance.totals.credit)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : trialBalance ? (
+                <p className="text-sm text-slate-500">No posted activity for this date.</p>
+              ) : null}
+            </section>
+          )}
+
           {page === "journals" && (
-            <section
-              className="bg-white rounded-xl border p-6 shadow-sm space-y-4"
-              style={{ borderColor: "var(--b2c-border)" }}
-            >
-              <h2 className="text-lg font-semibold">Posted journals</h2>
+            <section className="space-y-4">
+              <div
+                className="rounded-xl border bg-white p-5 shadow-sm"
+                style={{ borderColor: "var(--b2c-border)" }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">General journal — posted entries</h2>
+                    <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
+                      PH-style GJ vouchers with system JV numbers (<span className="font-mono">JV-YYYY-NNNNN</span>),
+                      subsidiary member/vendor columns, and print-to-PDF. Integration sales from the WebApp Coop store
+                      appear here when posted.
+                    </p>
+                  </div>
+                  {journals.length > 0 ? (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => printJournalVouchers(journals, { title: "Posted general journal" })}
+                        className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-800 shadow-sm hover:border-[var(--b2c-forest-900)] hover:text-[var(--b2c-forest-900)]"
+                      >
+                        Print all / PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadJournalsCsv(journals)}
+                        className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-800 shadow-sm hover:border-[var(--b2c-forest-900)] hover:text-[var(--b2c-forest-900)]"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {journals.length > 0 ? (
+                  <p className="mt-3 text-xs font-medium text-slate-500">
+                    Showing {journals.length} most recent posted voucher
+                    {journals.length === 1 ? "" : "s"} (newest first).
+                  </p>
+                ) : null}
+              </div>
               {journals.length === 0 && (
-                <p className="text-sm text-gray-500">No entries yet — WebApp posts via integration API.</p>
+                <p className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500">
+                  No posted journals yet — approve vouchers or post from the WebApp integration API.
+                </p>
               )}
-              {journals.map((j) => (
-                <JournalCard key={j.id} journal={j} />
-              ))}
+              <div className="space-y-5">
+                {journals.map((j) => (
+                  <JournalVoucherCard key={j.id} transaction={j} variant="posted" />
+                ))}
+              </div>
             </section>
           )}
         </main>

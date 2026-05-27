@@ -17,9 +17,11 @@ const COA: CoaRow[] = [
   { code: "11110", title: "Cash on Hand", type: AccountType.ASSET, parentCode: "11100" },
   { code: "11130", title: "Cash in Bank", type: AccountType.ASSET, parentCode: "11100" },
   { code: "11210", title: "Loans Receivable - Current", type: AccountType.ASSET, parentCode: "11000" },
+  { code: "11410", title: "Merchandise Inventory", type: AccountType.ASSET, parentCode: "11000" },
   { code: "20000", title: "LIABILITIES", type: AccountType.LIABILITY },
   { code: "21110", title: "Savings Deposits", type: AccountType.LIABILITY, parentCode: "20000" },
   { code: "21210", title: "Accounts Payable - Trade", type: AccountType.LIABILITY, parentCode: "20000" },
+  { code: "21310", title: "Patronage Refund Payable", type: AccountType.LIABILITY, parentCode: "20000" },
   { code: "30000", title: "EQUITY", type: AccountType.EQUITY },
   { code: "30130", title: "Paid-up Share Capital - Common", type: AccountType.EQUITY, parentCode: "30000" },
   { code: "30710", title: "Reserve Fund", type: AccountType.EQUITY, parentCode: "30000", isStatutory: true },
@@ -27,6 +29,9 @@ const COA: CoaRow[] = [
   { code: "40000", title: "REVENUE", type: AccountType.REVENUE },
   { code: "40310", title: "Sales", type: AccountType.REVENUE, parentCode: "40000" },
   { code: "40420", title: "Membership Fee", type: AccountType.REVENUE, parentCode: "40000" },
+  { code: "50000", title: "EXPENSES", type: AccountType.EXPENSE },
+  { code: "50110", title: "Cost of Goods Sold", type: AccountType.EXPENSE, parentCode: "50000" },
+  { code: "50410", title: "Patronage Refund Expense", type: AccountType.EXPENSE, parentCode: "50000" },
 ];
 
 export async function seedCdaCoa() {

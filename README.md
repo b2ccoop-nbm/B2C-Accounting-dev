@@ -38,6 +38,12 @@ npm run dev
 
 Open http://localhost:5174
 
+Health check (all services): `./scripts/check-dev.sh`
+
+**After migrations:** `cd backend && npx prisma generate` then restart API (`npm run dev` uses `predev` automatically).
+
+See [DEVELOPMENT.md](./DEVELOPMENT.md) and [OPERATIONS.md](./OPERATIONS.md).
+
 ## Integration API (WebApp → Accounting)
 
 ```http

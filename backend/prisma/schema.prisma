@@ -63,9 +63,18 @@ model FiscalPeriod {
   @@unique([year, month])
 }
 
+/// Per-calendar-year JV counter (PH general journal numbering: JV-YYYY-NNNNN)
+model JournalSequence {
+  year       Int @id
+  nextNumber Int @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
 /// Voucher header — manual flow uses PENDING_APPROVAL; integration posts as POSTED
 model Transaction {
   id              String            @id @default(uuid())
+  /// System JV number (JV-2026-00001) — primary display for accountants
+  jvNumber        String?           @unique
   reference       String            @unique
   description     String
   transactionDate DateTime

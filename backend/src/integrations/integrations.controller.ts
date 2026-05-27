@@ -50,4 +50,16 @@ export class IntegrationsController {
   getMemberSummary(@Param("participantId", ParseUUIDPipe) participantId: string) {
     return this.integrations.getMemberSummary(participantId);
   }
+
+  @Get("members/:participantId/ledger")
+  @UseGuards(StaffJwtGuard)
+  getMemberLedger(@Param("participantId", ParseUUIDPipe) participantId: string) {
+    return this.integrations.getMemberLedger(participantId);
+  }
+
+  @Get("members/:participantId/patronage")
+  @UseGuards(IntegrationAuthGuard)
+  getMemberPatronage(@Param("participantId", ParseUUIDPipe) participantId: string) {
+    return this.integrations.getMemberPatronageSummary(participantId);
+  }
 }

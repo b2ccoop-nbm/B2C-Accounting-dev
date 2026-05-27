@@ -16,6 +16,34 @@ const CASH_CODES = ["11110", "11130", "1010"];
 export class LedgerService {
   constructor(private readonly prisma: PrismaService) {}
 
+  static formatJvNumber(year: number, sequence: number): string {
+    return `JV-${year}-${String(sequence).padStart(5, "0")}`;
+  }
+
+  /** Preview next JV without consuming the sequence (for voucher form). */
+  async peekNextJvNumber(date: Date): Promise<string> {
+    const year = date.getFullYear();
+    const row = await this.prisma.journalSequence.findUnique({ where: { year } });
+    const next = (row?.nextNumber ?? 0) + 1;
+    return LedgerService.formatJvNumber(year, next);
+  }
+
+  /** Allocate next JV inside an existing Prisma transaction. */
+  async allocateJvNumber(tx: Prisma.TransactionClient, date: Date): Promise<string> {
+    const year = date.getFullYear();
+    const row = await tx.journalSequence.upsert({
+      where: { year },
+      create: { year, nextNumber: 0 },
+      update: {},
+    });
+    const seq = row.nextNumber + 1;
+    await tx.journalSequence.update({
+      where: { year },
+      data: { nextNumber: seq },
+    });
+    return LedgerService.formatJvNumber(year, seq);
+  }
+
   listAccounts() {
     return this.prisma.account.findMany({
       where: { isActive: true },
@@ -29,8 +57,9 @@ export class LedgerService {
       take: Math.min(limit, 200),
       orderBy: { transactionDate: "desc" },
       include: {
+        fiscalPeriod: true,
         integrationEvent: true,
-        entries: { include: { account: true } },
+        entries: { include: { account: true, vendor: true } },
       },
     });
   }
@@ -64,15 +93,24 @@ export class LedgerService {
       );
     }
 
+    const sourceDocument =
+      (dto.sourceDocument ?? dto.reference ?? "").trim() || null;
+
     return this.prisma.$transaction(async (tx) => {
+      const jvNumber = await this.allocateJvNumber(tx, txDate);
       return tx.transaction.create({
         data: {
-          reference: dto.reference,
+          jvNumber,
+          reference: jvNumber,
           description: dto.description,
           transactionDate: txDate,
           status: TransactionStatus.PENDING_APPROVAL,
           postedBy: postedByUserId,
+          source: "VOUCHER",
           fiscalPeriodId: period.id,
+          metadata: sourceDocument
+            ? ({ sourceDocument } as Prisma.InputJsonValue)
+            : undefined,
           entries: {
             create: dto.entries.map((entry) => ({
               accountId: entry.accountId,
@@ -174,7 +212,7 @@ export class LedgerService {
     return this.prisma.transaction.findMany({
       where: { status: TransactionStatus.PENDING_APPROVAL },
       include: {
-        entries: { include: { account: true } },
+        entries: { include: { account: true, vendor: true } },
         fiscalPeriod: true,
       },
       orderBy: { transactionDate: "asc" },
@@ -207,6 +245,71 @@ export class LedgerService {
     }, new Decimal(0));
 
     return total.toNumber();
+  }
+
+  async getTrialBalance(asOf?: string) {
+    const when = asOf ? new Date(asOf) : new Date();
+    if (Number.isNaN(when.getTime())) {
+      throw new BadRequestException("Invalid asOf date");
+    }
+
+    const accounts = await this.prisma.account.findMany({
+      where: { isActive: true },
+      orderBy: { code: "asc" },
+    });
+
+    const lines = await this.prisma.journalEntry.findMany({
+      where: {
+        transaction: {
+          status: TransactionStatus.POSTED,
+          transactionDate: { lte: when },
+        },
+      },
+      include: { account: true },
+    });
+
+    const totals = new Map<string, { debit: Decimal; credit: Decimal; account: (typeof accounts)[0] }>();
+    for (const acc of accounts) {
+      totals.set(acc.id, { debit: new Decimal(0), credit: new Decimal(0), account: acc });
+    }
+
+    for (const line of lines) {
+      const bucket = totals.get(line.accountId);
+      if (!bucket) continue;
+      bucket.debit = bucket.debit.plus(line.debit);
+      bucket.credit = bucket.credit.plus(line.credit);
+    }
+
+    const debitNormal = new Set(["ASSET", "EXPENSE", "COST_OF_GOODS"]);
+    const rows = [...totals.values()]
+      .map(({ debit, credit, account }) => {
+        const net = debitNormal.has(account.type)
+          ? debit.minus(credit)
+          : credit.minus(debit);
+        if (debit.isZero() && credit.isZero()) return null;
+        return {
+          code: account.code,
+          title: account.title,
+          type: account.type,
+          debitTotal: debit.toFixed(2),
+          creditTotal: credit.toFixed(2),
+          balance: net.toFixed(2),
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r != null);
+
+    const sumDebit = rows.reduce((s, r) => s.plus(new Decimal(r.debitTotal)), new Decimal(0));
+    const sumCredit = rows.reduce((s, r) => s.plus(new Decimal(r.creditTotal)), new Decimal(0));
+
+    return {
+      asOf: when.toISOString(),
+      currency: "PHP",
+      rows,
+      totals: {
+        debit: sumDebit.toFixed(2),
+        credit: sumCredit.toFixed(2),
+      },
+    };
   }
 
   async findOpenFiscalPeriod(date: Date) {

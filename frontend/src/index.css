@@ -19,3 +19,20 @@ body {
   background: var(--b2c-mint-50);
   color: var(--b2c-text);
 }
+
+@media print {
+  body {
+    background: white;
+  }
+  nav,
+  header.app-chrome,
+  button,
+  .print\\:hidden {
+    display: none !important;
+  }
+  .journal-voucher-card {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #cbd5e1;
+  }
+}
