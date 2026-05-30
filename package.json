@@ -7,6 +7,13 @@
     "dev:ui": "npm run dev --prefix frontend",
     "db:up": "npm run db:up --prefix backend",
     "db:migrate": "npm run prisma:migrate --prefix backend",
-    "db:seed": "npm run prisma:seed --prefix backend"
+    "db:seed": "npm run prisma:seed --prefix backend",
+    "deploy:prod": "bash scripts/deploy-prod.sh",
+    "deploy:prod:ci": "CI=true DEPLOY_UI=1 bash scripts/railway-deploy-production.sh",
+    "deploy:api": "npm run deploy:railway --prefix backend",
+    "deploy:ui": "npm run pages:deploy:prod --prefix frontend",
+    "railway:env": "bash scripts/railway-env-push.sh",
+    "railway:setup": "bash scripts/railway-setup.sh",
+    "wire:webapp": "bash scripts/wire-webapp-accounting.sh"
   }
 }
