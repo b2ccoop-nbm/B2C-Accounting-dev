@@ -92,11 +92,13 @@ async function main() {
     },
   });
 
-  await prisma.staffUser.upsert({
-    where: { email: "nmatunog@gmail.com" },
-    create: { email: "nmatunog@gmail.com", role: "SUPERUSER" },
-    update: { role: "SUPERUSER" },
-  });
+  for (const email of ["nmatunog@gmail.com", "b2ccoop@gmail.com"]) {
+    await prisma.staffUser.upsert({
+      where: { email },
+      create: { email, role: "SUPERUSER" },
+      update: { role: "SUPERUSER" },
+    });
+  }
 
   const demoVendor = await prisma.vendor.upsert({
     where: { code: "B2C-DEMO" },

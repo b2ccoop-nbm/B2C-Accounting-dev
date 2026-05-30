@@ -5,10 +5,13 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { StaffRole } from "@prisma/client";
 import * as admin from "firebase-admin";
 import { PrismaService } from "../prisma/prisma.service";
-import type { StaffJwtRole } from "./staff-jwt.guard";
+import {
+  isStaffJwtRole,
+  staffRoleToJwt,
+  type StaffJwtRole,
+} from "./staff-roles";
 
 export type StaffSessionResponse = {
   accessToken: string;
@@ -16,18 +19,6 @@ export type StaffSessionResponse = {
   role: StaffJwtRole;
   email: string;
 };
-
-function staffRoleToJwt(role: StaffRole): StaffJwtRole {
-  switch (role) {
-    case StaffRole.SUPERUSER:
-      return "superuser";
-    case StaffRole.TREASURER:
-      return "treasurer";
-    case StaffRole.ADMIN:
-    default:
-      return "admin";
-  }
-}
 
 @Injectable()
 export class AuthService {
@@ -77,7 +68,7 @@ export class AuthService {
     let staff = await this.prisma.staffUser.findUnique({ where: { email } });
     if (!staff) {
       throw new ForbiddenException(
-        "No accounting staff record for this email — ask an admin to add you in StaffUser",
+        "No accounting access for this email — ask a superuser to add you under Staff access",
       );
     }
     if (decoded.uid && staff.firebaseUid !== decoded.uid) {
@@ -88,8 +79,7 @@ export class AuthService {
     }
 
     const role = staffRoleToJwt(staff.role);
-    const allowed: StaffJwtRole[] = ["superuser", "admin", "treasurer"];
-    if (!allowed.includes(role)) {
+    if (!isStaffJwtRole(role)) {
       throw new ForbiddenException("Role not permitted for accounting");
     }
 

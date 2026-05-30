@@ -203,6 +203,17 @@ npm run smoke:prod
 
 Manual: staff sign-in on Accounting UI; WebApp Treasurer fee → JV; coop store → marketplace JV.
 
+**Accounting staff login** (separate from PMES roles): Firebase sign-in + row in Postgres `StaffUser`. PMES “superuser” does not auto-grant Accounting access.
+
+```bash
+cd backend
+node scripts/add-staff.js someone@example.com SUPERUSER   # or ADMIN, TREASURER, ACCOUNTANT, GENERAL_MANAGER, CHAIRMAN
+```
+
+**Superuser UI:** sign in at finance → **Staff access** — add email + role (Treasurer, Accountant, General Manager, Chairperson, Admin). Users need a Firebase account on the same project as the WebApp.
+
+Uses `DATABASE_URL` from `backend/.env` (production Supabase when that file points at prod).
+
 ### 4. Housekeeping
 
 - Revoke old Cloudflare tokens exposed in terminal history  
@@ -210,6 +221,22 @@ Manual: staff sign-in on Accounting UI; WebApp Treasurer fee → JV; coop store 
 - `bash scripts/cloudflare-token-setup.sh` after rotating tokens  
 
 Or run all scripted steps: `npm run post:prod`
+
+## Resetting data later (production testing → go-live)
+
+OK to keep current Supabase data while testing PMES ↔ Accounting in production. Before real cooperative books, reset in tiers:
+
+| Tier | Keep | Clear |
+|------|------|--------|
+| **A — Journals only** | COA, `StaffUser`, posting rules, vendors/products | `Transaction`, `JournalEntry`, `IntegrationEvent`; reset `JournalSequence` |
+| **B — Full ledger** | `StaffUser` | Tier A + accounts, fiscal periods, templates, vendors — then `npm run db:seed` |
+| **C — New database** | — | New Supabase project; update Railway `DATABASE_URL` / `DIRECT_URL`; `prisma migrate deploy` + seed |
+
+**Never** run `prisma migrate reset` on production (drops all tables).
+
+Smoke tests use `externalId` like `smoke:…` — delete those rows before go-live if you want a clean trial balance.
+
+Until cutover, treat production balances as **test data**.
 
 ## Integration smoke (production)
 

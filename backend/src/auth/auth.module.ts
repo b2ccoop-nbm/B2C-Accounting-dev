@@ -5,6 +5,7 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { IntegrationAuthGuard } from "./integration-auth.guard";
 import { StaffJwtGuard } from "./staff-jwt.guard";
+import { SuperuserGuard } from "./superuser.guard";
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { StaffJwtGuard } from "./staff-jwt.guard";
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, StaffJwtGuard, IntegrationAuthGuard],
-  exports: [AuthService, JwtModule, StaffJwtGuard, IntegrationAuthGuard],
+  providers: [AuthService, StaffJwtGuard, IntegrationAuthGuard, SuperuserGuard],
+  exports: [AuthService, JwtModule, StaffJwtGuard, IntegrationAuthGuard, SuperuserGuard],
 })
 export class AuthModule {}

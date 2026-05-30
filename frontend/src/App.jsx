@@ -11,6 +11,7 @@ import { auth, firebaseConfigured } from "./lib/firebase.js";
 import { downloadJournalsCsv, downloadTrialBalanceCsv } from "./lib/journalExport.js";
 import { formatAccountingDate } from "./lib/journalFormat.js";
 import { printJournalVouchers } from "./lib/journalPrint.js";
+import { canManageStaffAccess, staffRoleLabel } from "./lib/staffRoles.js";
 
 const TOKEN_KEY = "b2c_accounting_staff_token";
 
@@ -23,6 +24,7 @@ const NAV = [
   { id: "coa", label: "Chart of accounts" },
   { id: "journals", label: "Journals" },
   { id: "reports", label: "Reports" },
+  { id: "staff", label: "Staff access", superuserOnly: true },
 ];
 
 const DASHBOARD_CODES = [
@@ -118,6 +120,17 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [memberSummary, setMemberSummary] = useState(null);
   const [memberPatronage, setMemberPatronage] = useState(null);
+
+  const [staffDirectory, setStaffDirectory] = useState([]);
+  const [assignableRoles, setAssignableRoles] = useState([]);
+  const [staffForm, setStaffForm] = useState({ email: "", role: "TREASURER" });
+  const [staffLoading, setStaffLoading] = useState(false);
+
+  const isSuperuser = canManageStaffAccess(staff?.role);
+  const visibleNav = useMemo(
+    () => NAV.filter((item) => !item.superuserOnly || isSuperuser),
+    [isSuperuser],
+  );
   const [memberLedger, setMemberLedger] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
 
@@ -215,6 +228,32 @@ export default function App() {
       }
     });
   }, [exchangeFirebaseToken, persistToken, token]);
+
+  const loadStaffDirectory = useCallback(async () => {
+    if (!token || !isSuperuser) return;
+    setStaffLoading(true);
+    try {
+      const [rows, roles] = await Promise.all([
+        apiFetch("/staff", { token }),
+        apiFetch("/staff/roles", { token }),
+      ]);
+      setStaffDirectory(Array.isArray(rows) ? rows : []);
+      setAssignableRoles(Array.isArray(roles) ? roles : []);
+      if (roles?.length) {
+        setStaffForm((f) =>
+          roles.some((r) => r.role === f.role) ? f : { ...f, role: roles[0].role },
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load staff list");
+    } finally {
+      setStaffLoading(false);
+    }
+  }, [token, isSuperuser]);
+
+  useEffect(() => {
+    if (page === "staff" && isSuperuser) loadStaffDirectory();
+  }, [page, isSuperuser, loadStaffDirectory]);
 
   const fetchBalances = useCallback(
     async (codes) => {
@@ -581,7 +620,7 @@ export default function App() {
         <div>
           <h1 className="text-xl font-semibold">B2CCoop Accounting</h1>
           <p className="text-sm text-white/80">
-            {staff?.email ?? "Staff"} · {staff?.role ?? "staff"}
+            {staff?.email ?? "Staff"} · {staffRoleLabel(staff?.role)}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -611,7 +650,7 @@ export default function App() {
           style={{ borderColor: "var(--b2c-border)" }}
         >
           <ul className="space-y-1">
-            {NAV.map((item) => (
+            {visibleNav.map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
@@ -641,7 +680,7 @@ export default function App() {
 
         <main className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
           <div className="md:hidden flex flex-wrap gap-2">
-            {NAV.map((item) => (
+            {visibleNav.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -1288,6 +1327,162 @@ export default function App() {
               ) : trialBalance ? (
                 <p className="text-sm text-slate-500">No posted activity for this date.</p>
               ) : null}
+            </section>
+          )}
+
+          {page === "staff" && isSuperuser && (
+            <section className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Staff access</h2>
+                <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                  Grant Firebase users access to this accounting app. They sign in with the same b2ccoop.com
+                  password as the WebApp. Roles: Treasurer, Accountant, General Manager, Chairperson, or Admin.
+                </p>
+              </div>
+
+              <form
+                className="rounded-xl border bg-white p-4 shadow-sm flex flex-wrap gap-3 items-end"
+                style={{ borderColor: "var(--b2c-border)" }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setError("");
+                  setNotice("");
+                  try {
+                    await apiFetch("/staff", {
+                      method: "POST",
+                      token,
+                      body: JSON.stringify({
+                        email: staffForm.email.trim().toLowerCase(),
+                        role: staffForm.role,
+                      }),
+                    });
+                    setStaffForm({ email: "", role: staffForm.role });
+                    setNotice("Staff access granted.");
+                    await loadStaffDirectory();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not add staff");
+                  }
+                }}
+              >
+                <label className="flex flex-col gap-1 text-sm flex-1 min-w-[12rem]">
+                  <span className="font-medium text-slate-700">Email</span>
+                  <input
+                    type="email"
+                    required
+                    value={staffForm.email}
+                    onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
+                    className="rounded-lg border px-3 py-2"
+                    style={{ borderColor: "var(--b2c-border)" }}
+                    placeholder="name@example.com"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm min-w-[10rem]">
+                  <span className="font-medium text-slate-700">Role</span>
+                  <select
+                    value={staffForm.role}
+                    onChange={(e) => setStaffForm((f) => ({ ...f, role: e.target.value }))}
+                    className="rounded-lg border px-3 py-2 bg-white"
+                    style={{ borderColor: "var(--b2c-border)" }}
+                  >
+                    {assignableRoles.map((r) => (
+                      <option key={r.role} value={r.role}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="submit"
+                  className="rounded-lg px-4 py-2 text-sm font-bold text-white"
+                  style={{ background: "var(--b2c-forest-900)" }}
+                >
+                  Add access
+                </button>
+              </form>
+
+              <div
+                className="rounded-xl border bg-white shadow-sm overflow-hidden"
+                style={{ borderColor: "var(--b2c-border)" }}
+              >
+                {staffLoading ? (
+                  <p className="p-6 text-sm text-slate-500">Loading…</p>
+                ) : staffDirectory.length === 0 ? (
+                  <p className="p-6 text-sm text-slate-500">No staff records yet.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Email</th>
+                        <th className="px-4 py-3">Role</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {staffDirectory.map((row) => (
+                        <tr key={row.id} className="border-t border-slate-100">
+                          <td className="px-4 py-3">{row.email}</td>
+                          <td className="px-4 py-3">
+                            {row.role === "SUPERUSER" ? (
+                              <span className="font-medium">{row.roleLabel}</span>
+                            ) : (
+                              <select
+                                value={row.role}
+                                className="rounded border px-2 py-1 text-sm bg-white"
+                                style={{ borderColor: "var(--b2c-border)" }}
+                                onChange={async (e) => {
+                                  setError("");
+                                  setNotice("");
+                                  try {
+                                    await apiFetch(`/staff/${row.id}`, {
+                                      method: "PATCH",
+                                      token,
+                                      body: JSON.stringify({ role: e.target.value }),
+                                    });
+                                    setNotice(`Updated ${row.email}`);
+                                    await loadStaffDirectory();
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Update failed");
+                                  }
+                                }}
+                              >
+                                {assignableRoles.map((r) => (
+                                  <option key={r.role} value={r.role}>
+                                    {r.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {row.role !== "SUPERUSER" ? (
+                              <button
+                                type="button"
+                                className="text-red-700 text-xs font-bold uppercase tracking-wide hover:underline"
+                                onClick={async () => {
+                                  if (!window.confirm(`Remove accounting access for ${row.email}?`)) return;
+                                  setError("");
+                                  setNotice("");
+                                  try {
+                                    await apiFetch(`/staff/${row.id}`, { method: "DELETE", token });
+                                    setNotice(`Removed ${row.email}`);
+                                    await loadStaffDirectory();
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Remove failed");
+                                  }
+                                }}
+                              >
+                                Remove
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </section>
           )}
 

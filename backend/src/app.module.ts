@@ -10,6 +10,7 @@ import { LedgerModule } from "./ledger/ledger.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RootController } from "./root.controller";
+import { StaffModule } from "./staff/staff.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RootController } from "./root.controller";
     LedgerModule,
     IntegrationsModule,
     MarketplaceModule,
+    StaffModule,
   ],
   controllers: [RootController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -7,7 +7,8 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import type { Request } from "express";
-import type { StaffJwtPayload, StaffJwtRole } from "./staff-jwt.guard";
+import { isStaffJwtRole, type StaffJwtRole } from "./staff-roles";
+import type { StaffJwtPayload } from "./staff-jwt.guard";
 
 /** Accepts WebApp staff JWT or INTEGRATION_SERVICE_SECRET as Bearer token. */
 @Injectable()
@@ -37,9 +38,8 @@ export class IntegrationAuthGuard implements CanActivate {
     try {
       const secret = this.config.get<string>("ADMIN_JWT_SECRET");
       const payload = this.jwt.verify<{ role?: string; sub?: string }>(token, { secret });
-      const allowed: StaffJwtRole[] = ["superuser", "admin", "treasurer"];
       const roleRaw = payload?.role;
-      if (typeof roleRaw !== "string" || !allowed.includes(roleRaw as StaffJwtRole)) {
+      if (typeof roleRaw !== "string" || !isStaffJwtRole(roleRaw)) {
         throw new UnauthorizedException("Staff role not permitted for integration writes");
       }
       if (!payload?.sub) {

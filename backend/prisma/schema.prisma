@@ -28,6 +28,9 @@ enum StaffRole {
   SUPERUSER
   ADMIN
   TREASURER
+  ACCOUNTANT
+  GENERAL_MANAGER
+  CHAIRMAN
 }
 
 /// Hierarchical chart of accounts (CDA MC 2016-06)
