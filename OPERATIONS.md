@@ -144,6 +144,15 @@ npm run deploy:prod
 | `Wrangler requires at least Node.js v22` | `nvm install 22 && nvm use` (or Volta/fnm) before `npm run deploy:prod` |
 | `npx prisma` / Prisma 7 `url` no longer supported | Script runs `npm ci` + `npm exec prisma` in `backend/` — do not run bare `npx prisma` from an empty tree |
 | Cloudflare `Authentication failed` / code `9106` in Actions | Replace `CLOUDFLARE_API_TOKEN` with a dashboard **API Token** (not Wrangler OAuth) |
+| `Invalid format for Authorization header` / code `6111` | Secret has quotes or a pasted **curl** line — run `bash scripts/cloudflare-token-setup.sh` |
+
+**Set Cloudflare token (interactive, recommended):**
+
+```bash
+bash scripts/cloudflare-token-setup.sh
+```
+
+Paste **only** the token string from Cloudflare (starts with `cfut_` once, e.g. `cfut_AbCd...`). **Never** type `cfut_` twice (`cfut_cfut_...` is wrong). **Do not** paste the “test with curl” example.
 
 ## Integration smoke (production)
 
