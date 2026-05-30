@@ -126,8 +126,8 @@ Workflow [`.github/workflows/deploy-production.yml`](./.github/workflows/deploy-
 | `RAILWAY_TOKEN` | Project token from Railway → project → Settings → Tokens |
 | `DATABASE_URL` | Supabase pooled URL (for `prisma migrate deploy` in CI) |
 | `DIRECT_URL` | Supabase direct URL |
-| `CLOUDFLARE_API_TOKEN` | Wrangler Pages deploy |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
+| `CLOUDFLARE_API_TOKEN` | **API Token** from [Cloudflare → Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens) (template: **Edit Cloudflare Workers**; must include **Account → Cloudflare Pages → Edit**). **Not** the Wrangler OAuth token from your laptop. |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id (`66e72ecb625c7e76d017a366156ec53f` for this team) |
 | `VITE_FIREBASE_*` | Same six vars as `frontend/.env` |
 
 **Manual / local production deploy** (same script as CI):
