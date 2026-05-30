@@ -46,9 +46,11 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify Node version
+        working-directory: ${{ github.workspace }}
+        run: node -v
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli@latest
