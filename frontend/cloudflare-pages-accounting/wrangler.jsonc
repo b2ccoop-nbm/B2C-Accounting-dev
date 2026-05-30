@@ -1,0 +1,5 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "b2ccoop-accounting-ui",
+	"pages_build_output_dir": "../dist"
+}

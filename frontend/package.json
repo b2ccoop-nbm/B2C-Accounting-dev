@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --port 5174",
     "build": "vite build",
-    "preview": "vite preview --port 5174"
+    "preview": "vite preview --port 5174",
+    "pages:deploy:prod": "npm run build && wrangler pages deploy --cwd cloudflare-pages-accounting --project-name b2ccoop-accounting-ui --commit-dirty=true"
   },
   "dependencies": {
     "firebase": "^12.11.0",
@@ -17,6 +18,7 @@
     "@tailwindcss/vite": "^4.2.2",
     "@vitejs/plugin-react": "^6.0.1",
     "tailwindcss": "^4.2.2",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "wrangler": "^4.81.1"
   }
 }

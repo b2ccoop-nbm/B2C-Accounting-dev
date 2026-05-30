@@ -1,0 +1,12 @@
+# B2CCoop Accounting API — deploy from this directory: railway link && railway up
+# Docs: https://docs.railway.com/guides/cli
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
