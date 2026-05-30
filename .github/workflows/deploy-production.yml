@@ -69,5 +69,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Verify Cloudflare API token
+        run: bash scripts/verify-cloudflare-token.sh
+
       - name: Deploy UI (Cloudflare Pages)
         run: bash scripts/railway-deploy-production.sh

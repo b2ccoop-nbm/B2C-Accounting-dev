@@ -24,9 +24,25 @@ for key in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT
   echo "Set $key"
 done
 
-echo "CLOUDFLARE_API_TOKEN: create at https://dash.cloudflare.com/profile/api-tokens"
-echo "  (Edit Cloudflare Workers + Pages Edit) and add manually in GitHub Secrets."
-
 gh secret set CLOUDFLARE_ACCOUNT_ID --body "$CF_ACCOUNT_ID" --repo "$REPO"
 echo "Set CLOUDFLARE_ACCOUNT_ID"
+
+if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
+  bash "$ROOT/scripts/verify-cloudflare-token.sh"
+  gh secret set CLOUDFLARE_API_TOKEN --body "$CLOUDFLARE_API_TOKEN" --repo "$REPO"
+  echo "Set CLOUDFLARE_API_TOKEN"
+else
+  echo ""
+  echo "Create an API token: https://dash.cloudflare.com/profile/api-tokens"
+  echo "  Template: Edit Cloudflare Workers (includes Pages Edit), or custom with:"
+  echo "    Account → Cloudflare Pages → Edit"
+  echo "    Account → Account Settings → Read (optional, for wrangler whoami)"
+  echo ""
+  echo "Then verify and push to GitHub:"
+  echo "  export CLOUDFLARE_API_TOKEN='paste-token-here'"
+  echo "  bash scripts/verify-cloudflare-token.sh"
+  echo "  gh secret set CLOUDFLARE_API_TOKEN --body \"\$CLOUDFLARE_API_TOKEN\" --repo $REPO"
+fi
+
 echo "Done. DATABASE_URL, DIRECT_URL, RAILWAY_TOKEN must be set manually in GitHub if not already."
