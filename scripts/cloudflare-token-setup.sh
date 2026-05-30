@@ -10,10 +10,18 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/normalize-cloudflare-t
 
 echo "Cloudflare API token → GitHub secret (repo: ${REPO})"
 echo ""
-echo "Paste ONLY the token from the Cloudflare page (one line)."
-echo "Do NOT paste the curl example. Press Enter when done."
-echo ""
-read -rsp "API token: " PASTED
+
+PASTED="${CLOUDFLARE_API_TOKEN:-}"
+if [[ -n "$PASTED" ]]; then
+  echo "Using CLOUDFLARE_API_TOKEN from environment."
+else
+  echo "Paste the FULL token from Cloudflare’s copy box (one line)."
+  echo "Do NOT type cfut_ before pasting — Cloudflare already includes it."
+  echo "Do NOT paste the curl example. (Cmd+V / right-click paste works here.)"
+  echo ""
+  # No -s flag: silent read blocks paste in Cursor and many macOS terminals.
+  read -r -p "API token: " PASTED
+fi
 echo ""
 
 TOKEN="$(normalize_cloudflare_token "$PASTED")"
@@ -27,7 +35,8 @@ fi
 
 export CLOUDFLARE_API_TOKEN="$TOKEN"
 if [[ "$TOKEN" == cfut_cfut_* ]]; then
-  echo "ERROR: Token still has double cfut_ prefix — paste only the value from Cloudflare (one cfut_)." >&2
+  echo "ERROR: Token has cfut_ twice — you added cfut_ before a value that already started with cfut_." >&2
+  echo "Paste only what Cloudflare’s Copy button gives you (one cfut_ at the start)." >&2
   exit 1
 fi
 echo "Token length: ${#TOKEN} characters (prefix: ${TOKEN:0:12}...)"
@@ -36,10 +45,13 @@ bash "$ROOT/scripts/verify-cloudflare-token.sh"
 
 echo ""
 read -rp "Push to GitHub secret CLOUDFLARE_API_TOKEN? [y/N] " CONFIRM
-if [[ "${CONFIRM,,}" != "y" ]]; then
-  echo "Skipped gh secret set."
-  exit 0
-fi
+case "$CONFIRM" in
+  y|Y) ;;
+  *)
+    echo "Skipped gh secret set."
+    exit 0
+    ;;
+esac
 
 gh secret set CLOUDFLARE_API_TOKEN --body "$TOKEN" --repo "$REPO"
 echo "Updated GitHub secret. Re-run deploy:"

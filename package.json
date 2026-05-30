@@ -14,6 +14,9 @@
     "deploy:ui": "npm run pages:deploy:prod --prefix frontend",
     "railway:env": "bash scripts/railway-env-push.sh",
     "railway:setup": "bash scripts/railway-setup.sh",
-    "wire:webapp": "bash scripts/wire-webapp-accounting.sh"
+    "wire:webapp": "bash scripts/wire-webapp-accounting.sh",
+    "pages:domain": "bash scripts/add-pages-custom-domain.sh",
+    "smoke:prod": "bash scripts/smoke-production.sh",
+    "post:prod": "bash scripts/post-production-setup.sh"
   }
 }

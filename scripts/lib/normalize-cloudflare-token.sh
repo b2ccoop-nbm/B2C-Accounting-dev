@@ -10,6 +10,9 @@ normalize_cloudflare_token() {
   raw="${raw%\"}"
   raw="${raw#\'}"
   raw="${raw%\'}"
+  # Docs placeholders like <paste-token-here>
+  raw="${raw#<}"
+  raw="${raw%>}"
 
   if [[ "$raw" == *"Authorization: Bearer "* ]]; then
     raw="${raw#*Authorization: Bearer }"

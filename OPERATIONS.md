@@ -152,7 +152,64 @@ npm run deploy:prod
 bash scripts/cloudflare-token-setup.sh
 ```
 
-Paste **only** the token string from Cloudflare (starts with `cfut_` once, e.g. `cfut_AbCd...`). **Never** type `cfut_` twice (`cfut_cfut_...` is wrong). **Do not** paste the “test with curl” example.
+Or pass the token without an interactive prompt (paste-friendly):
+
+```bash
+# Replace the quotes with the FULL string Cloudflare shows once (copy all of it).
+CLOUDFLARE_API_TOKEN='<paste-full-token-from-cloudflare-dashboard>' bash scripts/cloudflare-token-setup.sh
+```
+
+Cloudflare’s copy box already includes the `cfut_` prefix — **paste that whole string**. Do **not** type `cfut_` yourself before pasting (that causes `cfut_cfut_...`). Do not paste the “test with curl” example.
+
+## Post-deploy (in order)
+
+After CI is green (`deploy-api` + `deploy-ui`):
+
+### 1. Custom domain `finance.b2ccoop.com`
+
+```bash
+export CLOUDFLARE_API_TOKEN='paste-full-token'
+npm run pages:domain
+```
+
+Or Cloudflare Dashboard → **Pages** → **b2ccoop-accounting-ui** → **Custom domains** → add `finance.b2ccoop.com`.
+
+If `b2ccoop.com` DNS is in Cloudflare, the wizard usually adds the CNAME automatically. Otherwise: CNAME `finance` → `b2ccoop-accounting-ui.pages.dev`.
+
+### 2. Wire PMES WebApp
+
+Pages-only API tokens **cannot** set Worker secrets. Use **`wrangler login`** (OAuth) in PMES, or an API token with **Workers Scripts → Edit**:
+
+```bash
+unset CLOUDFLARE_API_TOKEN   # if set to Pages-only token
+cd ../B2C-PMES/frontend && npx wrangler login
+cd ../../B2C-Accounting && npm run wire:webapp
+```
+
+Redeploy WebApp UI with Accounting link:
+
+```bash
+cd ../B2C-PMES/frontend
+# .env.production (create or append)
+# VITE_ACCOUNTING_APP_URL=https://finance.b2ccoop.com
+npm run pages:deploy:safe
+```
+
+### 3. Smoke test
+
+```bash
+npm run smoke:prod
+```
+
+Manual: staff sign-in on Accounting UI; WebApp Treasurer fee → JV; coop store → marketplace JV.
+
+### 4. Housekeeping
+
+- Revoke old Cloudflare tokens exposed in terminal history  
+- `npm run railway:env` if you changed `CORS_ORIGIN` or secrets in `backend/.env`  
+- `bash scripts/cloudflare-token-setup.sh` after rotating tokens  
+
+Or run all scripted steps: `npm run post:prod`
 
 ## Integration smoke (production)
 
