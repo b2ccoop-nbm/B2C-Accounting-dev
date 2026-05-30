@@ -1,7 +1,12 @@
 import { StaffRole } from "@prisma/client";
-import { IsEnum } from "class-validator";
+import { IsBoolean, IsEnum, IsOptional } from "class-validator";
 
 export class UpdateStaffDto {
+  @IsOptional()
   @IsEnum(StaffRole)
-  role!: StaffRole;
+  role?: StaffRole;
+
+  @IsOptional()
+  @IsBoolean()
+  isSuperuser?: boolean;
 }

@@ -92,13 +92,16 @@ async function main() {
     },
   });
 
-  for (const email of ["nmatunog@gmail.com", "b2ccoop@gmail.com"]) {
-    await prisma.staffUser.upsert({
-      where: { email },
-      create: { email, role: "SUPERUSER" },
-      update: { role: "SUPERUSER" },
-    });
-  }
+  await prisma.staffUser.upsert({
+    where: { email: "nmatunog@gmail.com" },
+    create: { email: "nmatunog@gmail.com", role: "CHAIRMAN", isSuperuser: true },
+    update: { role: "CHAIRMAN", isSuperuser: true },
+  });
+  await prisma.staffUser.upsert({
+    where: { email: "b2ccoop@gmail.com" },
+    create: { email: "b2ccoop@gmail.com", role: "SUPERUSER", isSuperuser: true },
+    update: { role: "SUPERUSER", isSuperuser: true },
+  });
 
   const demoVendor = await prisma.vendor.upsert({
     where: { code: "B2C-DEMO" },

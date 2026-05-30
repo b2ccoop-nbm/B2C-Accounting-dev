@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
+import { StaffRole, type StaffUser } from "@prisma/client";
 import * as admin from "firebase-admin";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -18,6 +19,7 @@ export type StaffSessionResponse = {
   expiresIn: string;
   role: StaffJwtRole;
   email: string;
+  superuser: boolean;
 };
 
 @Injectable()
@@ -45,6 +47,29 @@ export class AuthService {
       credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
     });
     return this.firebaseAdminApp;
+  }
+
+  private hasSuperuserAuth(staff: StaffUser): boolean {
+    return staff.isSuperuser || staff.role === StaffRole.SUPERUSER;
+  }
+
+  private async buildSession(staff: StaffUser): Promise<StaffSessionResponse> {
+    const role = staffRoleToJwt(staff.role);
+    if (!isStaffJwtRole(role)) {
+      throw new ForbiddenException("Role not permitted for accounting");
+    }
+    const superuser = this.hasSuperuserAuth(staff);
+    const accessToken = await this.jwt.signAsync(
+      { sub: staff.id, role, superuser },
+      { expiresIn: "8h" },
+    );
+    return {
+      accessToken,
+      expiresIn: "8h",
+      role,
+      email: staff.email,
+      superuser,
+    };
   }
 
   async exchangeFirebaseSession(idToken: string): Promise<StaffSessionResponse> {
@@ -78,15 +103,14 @@ export class AuthService {
       });
     }
 
-    const role = staffRoleToJwt(staff.role);
-    if (!isStaffJwtRole(role)) {
-      throw new ForbiddenException("Role not permitted for accounting");
-    }
+    return this.buildSession(staff);
+  }
 
-    const accessToken = await this.jwt.signAsync(
-      { sub: staff.id, role },
-      { expiresIn: "8h" },
-    );
-    return { accessToken, expiresIn: "8h", role, email };
+  async getStaffSession(staffId: string): Promise<StaffSessionResponse> {
+    const staff = await this.prisma.staffUser.findUnique({ where: { id: staffId } });
+    if (!staff) {
+      throw new ForbiddenException("Staff record not found");
+    }
+    return this.buildSession(staff);
   }
 }

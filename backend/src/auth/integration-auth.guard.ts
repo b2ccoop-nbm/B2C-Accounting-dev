@@ -37,7 +37,11 @@ export class IntegrationAuthGuard implements CanActivate {
 
     try {
       const secret = this.config.get<string>("ADMIN_JWT_SECRET");
-      const payload = this.jwt.verify<{ role?: string; sub?: string }>(token, { secret });
+      const payload = this.jwt.verify<{
+        role?: string;
+        sub?: string;
+        superuser?: boolean;
+      }>(token, { secret });
       const roleRaw = payload?.role;
       if (typeof roleRaw !== "string" || !isStaffJwtRole(roleRaw)) {
         throw new UnauthorizedException("Staff role not permitted for integration writes");
@@ -45,7 +49,11 @@ export class IntegrationAuthGuard implements CanActivate {
       if (!payload?.sub) {
         throw new UnauthorizedException("Invalid staff token");
       }
-      req.staffUser = { sub: payload.sub, role: roleRaw as StaffJwtRole };
+      req.staffUser = {
+        sub: payload.sub,
+        role: roleRaw as StaffJwtRole,
+        superuser: payload.superuser === true,
+      };
       return true;
     } catch {
       throw new UnauthorizedException("Invalid integration credentials");

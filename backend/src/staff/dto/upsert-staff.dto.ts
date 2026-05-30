@@ -1,5 +1,5 @@
 import { StaffRole } from "@prisma/client";
-import { IsEmail, IsEnum, IsNotEmpty } from "class-validator";
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional } from "class-validator";
 
 export class UpsertStaffDto {
   @IsEmail()
@@ -8,4 +8,8 @@ export class UpsertStaffDto {
 
   @IsEnum(StaffRole)
   role!: StaffRole;
+
+  @IsOptional()
+  @IsBoolean()
+  isSuperuser?: boolean;
 }

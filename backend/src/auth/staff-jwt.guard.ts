@@ -11,7 +11,11 @@ import type { Request } from "express";
 import { isStaffJwtRole, type StaffJwtRole } from "./staff-roles";
 
 export type { StaffJwtRole };
-export type StaffJwtPayload = { sub: string; role: StaffJwtRole };
+export type StaffJwtPayload = {
+  sub: string;
+  role: StaffJwtRole;
+  superuser?: boolean;
+};
 
 @Injectable()
 export class StaffJwtGuard implements CanActivate {
@@ -30,7 +34,11 @@ export class StaffJwtGuard implements CanActivate {
     }
     try {
       const secret = this.config.get<string>("ADMIN_JWT_SECRET");
-      const payload = this.jwt.verify<{ role?: string; sub?: string }>(token, { secret });
+      const payload = this.jwt.verify<{
+        role?: string;
+        sub?: string;
+        superuser?: boolean;
+      }>(token, { secret });
       const roleRaw = payload?.role;
       if (typeof roleRaw !== "string" || !isStaffJwtRole(roleRaw)) {
         throw new UnauthorizedException("Not an authorized staff token");
@@ -38,7 +46,11 @@ export class StaffJwtGuard implements CanActivate {
       if (!payload?.sub) {
         throw new UnauthorizedException("Invalid staff token");
       }
-      req.staffUser = { sub: payload.sub, role: roleRaw as StaffJwtRole };
+      req.staffUser = {
+        sub: payload.sub,
+        role: roleRaw as StaffJwtRole,
+        superuser: payload.superuser === true,
+      };
       return true;
     } catch {
       throw new UnauthorizedException("Invalid or expired staff token");

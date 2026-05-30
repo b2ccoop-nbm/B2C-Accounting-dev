@@ -210,7 +210,14 @@ cd backend
 node scripts/add-staff.js someone@example.com SUPERUSER   # or ADMIN, TREASURER, ACCOUNTANT, GENERAL_MANAGER, CHAIRMAN
 ```
 
-**Superuser UI:** sign in at finance → **Staff access** — add email + role (Treasurer, Accountant, General Manager, Chairperson, Admin). Users need a Firebase account on the same project as the WebApp.
+**Superuser UI:** sign in at finance → **Staff access** — view all Accounting users, **Download CSV**, add email + role (Treasurer, Accountant, General Manager, Chairperson, Admin). Toggle **Superuser authorization** for full admin (e.g. Chairperson with superuser powers). Users need a Firebase account on the same project as the WebApp.
+
+API (superuser JWT only): `GET /staff` — same list as the UI.
+
+| Email | Role (display) | Superuser auth |
+|-------|----------------|----------------|
+| `nmatunog@gmail.com` | Chairperson | Yes |
+| `b2ccoop@gmail.com` | Superuser | Yes |
 
 Uses `DATABASE_URL` from `backend/.env` (production Supabase when that file points at prod).
 

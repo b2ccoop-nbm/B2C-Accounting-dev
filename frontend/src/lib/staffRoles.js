@@ -12,6 +12,6 @@ export function staffRoleLabel(role) {
   return STAFF_ROLE_LABELS[role] ?? role ?? "Staff";
 }
 
-export function canManageStaffAccess(role) {
-  return role === "superuser";
+export function canManageStaffAccess(role, superuser) {
+  return superuser === true || role === "superuser";
 }

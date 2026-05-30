@@ -12,6 +12,11 @@ import { downloadJournalsCsv, downloadTrialBalanceCsv } from "./lib/journalExpor
 import { formatAccountingDate } from "./lib/journalFormat.js";
 import { printJournalVouchers } from "./lib/journalPrint.js";
 import { canManageStaffAccess, staffRoleLabel } from "./lib/staffRoles.js";
+import {
+  clearStaffProfile,
+  loadStaffProfile,
+  saveStaffProfile,
+} from "./lib/staffSession.js";
 
 const TOKEN_KEY = "b2c_accounting_staff_token";
 
@@ -104,7 +109,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) ?? "");
-  const [staff, setStaff] = useState(null);
+  const [staff, setStaff] = useState(() => loadStaffProfile());
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -123,10 +128,10 @@ export default function App() {
 
   const [staffDirectory, setStaffDirectory] = useState([]);
   const [assignableRoles, setAssignableRoles] = useState([]);
-  const [staffForm, setStaffForm] = useState({ email: "", role: "TREASURER" });
+  const [staffForm, setStaffForm] = useState({ email: "", role: "TREASURER", isSuperuser: false });
   const [staffLoading, setStaffLoading] = useState(false);
 
-  const isSuperuser = canManageStaffAccess(staff?.role);
+  const isSuperuser = canManageStaffAccess(staff?.role, staff?.superuser);
   const visibleNav = useMemo(
     () => NAV.filter((item) => !item.superuserOnly || isSuperuser),
     [isSuperuser],
@@ -196,8 +201,26 @@ export default function App() {
   const persistToken = useCallback((t) => {
     setToken(t);
     if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
+    else {
+      localStorage.removeItem(TOKEN_KEY);
+      clearStaffProfile();
+      setStaff(null);
+    }
   }, []);
+
+  const applySession = useCallback(
+    (session) => {
+      persistToken(session.accessToken);
+      const profile = {
+        email: session.email,
+        role: session.role,
+        superuser: session.superuser === true,
+      };
+      setStaff(profile);
+      saveStaffProfile(profile);
+    },
+    [persistToken],
+  );
 
   const exchangeFirebaseToken = useCallback(
     async (idToken) => {
@@ -205,11 +228,20 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ idToken }),
       });
-      persistToken(session.accessToken);
-      setStaff({ email: session.email, role: session.role });
+      applySession(session);
     },
-    [persistToken],
+    [applySession],
   );
+
+  const refreshStaffSession = useCallback(async () => {
+    if (!token) return;
+    try {
+      const session = await apiFetch("/auth/me", { token });
+      applySession(session);
+    } catch {
+      /* Firebase listener or sign-in will retry */
+    }
+  }, [token, applySession]);
 
   useEffect(() => {
     if (!firebaseConfigured || !auth) return;
@@ -228,6 +260,10 @@ export default function App() {
       }
     });
   }, [exchangeFirebaseToken, persistToken, token]);
+
+  useEffect(() => {
+    if (token && !staff?.email) refreshStaffSession();
+  }, [token, staff?.email, refreshStaffSession]);
 
   const loadStaffDirectory = useCallback(async () => {
     if (!token || !isSuperuser) return;
@@ -620,7 +656,7 @@ export default function App() {
         <div>
           <h1 className="text-xl font-semibold">B2CCoop Accounting</h1>
           <p className="text-sm text-white/80">
-            {staff?.email ?? "Staff"} · {staffRoleLabel(staff?.role)}
+            {staff?.email ?? "…"} · {staffRoleLabel(staff?.role)}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -712,7 +748,7 @@ export default function App() {
 
           {page === "dashboard" && (
             <section className="space-y-6">
-              <h2 className="text-lg font-semibold">Treasurer dashboard</h2>
+              <h2 className="text-lg font-semibold">Accounting dashboard</h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {DASHBOARD_CODES.map(({ code, label }) => (
                   <div
@@ -1332,12 +1368,44 @@ export default function App() {
 
           {page === "staff" && isSuperuser && (
             <section className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Staff access</h2>
-                <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                  Grant Firebase users access to this accounting app. They sign in with the same b2ccoop.com
-                  password as the WebApp. Roles: Treasurer, Accountant, General Manager, Chairperson, or Admin.
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Staff access</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                    Grant Firebase users access to this accounting app. They sign in with the same b2ccoop.com
+                    password as the WebApp. Assign a <strong>role</strong> (title shown in the header) and
+                    optional <strong>Superuser authorization</strong> (manage this screen).
+                  </p>
+                </div>
+                {staffDirectory.length > 0 ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-800 shadow-sm hover:border-[var(--b2c-forest-900)]"
+                    onClick={() => {
+                      const header = "email,role,role_label,superuser,created_at\n";
+                      const rows = staffDirectory
+                        .map((r) =>
+                          [
+                            r.email,
+                            r.role,
+                            `"${String(r.roleLabel).replace(/"/g, '""')}"`,
+                            r.isSuperuser ? "yes" : "no",
+                            r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : "",
+                          ].join(","),
+                        )
+                        .join("\n");
+                      const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `accounting-staff-access-${new Date().toISOString().slice(0, 10)}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    Download CSV
+                  </button>
+                ) : null}
               </div>
 
               <form
@@ -1354,9 +1422,10 @@ export default function App() {
                       body: JSON.stringify({
                         email: staffForm.email.trim().toLowerCase(),
                         role: staffForm.role,
+                        isSuperuser: staffForm.isSuperuser,
                       }),
                     });
-                    setStaffForm({ email: "", role: staffForm.role });
+                    setStaffForm({ email: "", role: staffForm.role, isSuperuser: false });
                     setNotice("Staff access granted.");
                     await loadStaffDirectory();
                   } catch (err) {
@@ -1391,6 +1460,16 @@ export default function App() {
                     ))}
                   </select>
                 </label>
+                <label className="flex items-center gap-2 text-sm pb-2">
+                  <input
+                    type="checkbox"
+                    checked={staffForm.isSuperuser}
+                    onChange={(e) =>
+                      setStaffForm((f) => ({ ...f, isSuperuser: e.target.checked }))
+                    }
+                  />
+                  <span className="font-medium text-slate-700">Superuser authorization</span>
+                </label>
                 <button
                   type="submit"
                   className="rounded-lg px-4 py-2 text-sm font-bold text-white"
@@ -1414,6 +1493,7 @@ export default function App() {
                       <tr>
                         <th className="px-4 py-3">Email</th>
                         <th className="px-4 py-3">Role</th>
+                        <th className="px-4 py-3">Superuser</th>
                         <th className="px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1453,8 +1533,33 @@ export default function App() {
                               </select>
                             )}
                           </td>
+                          <td className="px-4 py-3">
+                            {row.role === "SUPERUSER" ? (
+                              <span className="text-emerald-700 font-medium">Yes</span>
+                            ) : (
+                              <input
+                                type="checkbox"
+                                checked={row.isSuperuser}
+                                onChange={async (e) => {
+                                  setError("");
+                                  setNotice("");
+                                  try {
+                                    await apiFetch(`/staff/${row.id}`, {
+                                      method: "PATCH",
+                                      token,
+                                      body: JSON.stringify({ isSuperuser: e.target.checked }),
+                                    });
+                                    setNotice(`Updated ${row.email}`);
+                                    await loadStaffDirectory();
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Update failed");
+                                  }
+                                }}
+                              />
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-right">
-                            {row.role !== "SUPERUSER" ? (
+                            {row.role !== "SUPERUSER" || !row.isSuperuser ? (
                               <button
                                 type="button"
                                 className="text-red-700 text-xs font-bold uppercase tracking-wide hover:underline"

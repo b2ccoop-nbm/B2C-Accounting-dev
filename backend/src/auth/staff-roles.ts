@@ -58,6 +58,16 @@ export function isStaffJwtRole(value: string): value is StaffJwtRole {
   return (STAFF_JWT_ROLES as string[]).includes(value);
 }
 
-export function canManageStaffAccess(jwtRole: StaffJwtRole): boolean {
-  return jwtRole === "superuser";
+export function hasSuperuserAuthorization(payload: {
+  role: StaffJwtRole;
+  superuser?: boolean;
+}): boolean {
+  return payload.superuser === true || payload.role === "superuser";
+}
+
+export function canManageStaffAccess(
+  jwtRole: StaffJwtRole,
+  superuser?: boolean,
+): boolean {
+  return hasSuperuserAuthorization({ role: jwtRole, superuser });
 }

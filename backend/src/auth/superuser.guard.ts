@@ -6,14 +6,14 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import type { StaffJwtPayload } from "./staff-jwt.guard";
-import { canManageStaffAccess } from "./staff-roles";
+import { hasSuperuserAuthorization } from "./staff-roles";
 
 @Injectable()
 export class SuperuserGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest<Request & { staffUser?: StaffJwtPayload }>();
-    const role = req.staffUser?.role;
-    if (!role || !canManageStaffAccess(role)) {
+    const user = req.staffUser;
+    if (!user?.role || !hasSuperuserAuthorization(user)) {
       throw new ForbiddenException("Superuser access required");
     }
     return true;
