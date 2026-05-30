@@ -133,8 +133,17 @@ Workflow [`.github/workflows/deploy-production.yml`](./.github/workflows/deploy-
 **Manual / local production deploy** (same script as CI):
 
 ```bash
+nvm use    # .nvmrc → Node 22 (required for wrangler pages deploy)
 npm run deploy:prod
 ```
+
+**CI / deploy troubleshooting**
+
+| Symptom | Fix |
+|---------|-----|
+| `Wrangler requires at least Node.js v22` | `nvm install 22 && nvm use` (or Volta/fnm) before `npm run deploy:prod` |
+| `npx prisma` / Prisma 7 `url` no longer supported | Script runs `npm ci` + `npm exec prisma` in `backend/` — do not run bare `npx prisma` from an empty tree |
+| Cloudflare `Authentication failed` / code `9106` in Actions | Replace `CLOUDFLARE_API_TOKEN` with a dashboard **API Token** (not Wrangler OAuth) |
 
 ## Integration smoke (production)
 

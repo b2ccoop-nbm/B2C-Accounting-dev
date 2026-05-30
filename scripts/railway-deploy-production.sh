@@ -36,12 +36,13 @@ if [[ "$DEPLOY_API" == "1" ]]; then
 
   cd "$BACKEND"
 
-  if [[ -n "${DATABASE_URL:-}" ]]; then
+  if [[ -n "${DATABASE_URL:-}" ]] || [[ -f .env ]]; then
     echo "==> Prisma migrate deploy"
-    npx prisma migrate deploy
-  elif [[ -f "$BACKEND/.env" ]]; then
-    echo "==> Prisma migrate deploy (from backend/.env)"
-    npx prisma migrate deploy
+    # Use project Prisma (package.json); bare `npx prisma` can install Prisma 7+ and break schema.
+    if [[ ! -x node_modules/.bin/prisma ]]; then
+      npm ci
+    fi
+    npm exec prisma migrate deploy
   fi
 
   echo "==> Railway deploy (service: ${SERVICE_NAME})"
